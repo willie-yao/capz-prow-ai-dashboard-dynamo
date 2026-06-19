@@ -1,0 +1,50 @@
+name: Deploy Dashboard
+
+# Calls the reusable workflow in willie-yao/prow-ai-dashboard to build
+# and deploy this repo's CAPZ Prow dashboard (Dynamo variant) to GitHub
+# Pages. Runs on the in-cluster ARC self-hosted runner labelled
+# `arc-qwen-runner` so the fetcher can reach the Dynamo frontend
+# service over cluster DNS without exposing it publicly.
+
+on:
+  schedule:
+    # Hourly while the on-runner cache warms (a cold builds=10 fetch is
+    # ~75-90 min). Set back to "*/30 * * * *" once incremental runs are fast.
+    - cron: "0 * * * *"
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Match the prod CAPZ dashboard: don't let the next cron tick murder
+# an in-flight push deploy mid-fetch (universal-mode wall clock can
+# exceed the 30m cron window on a cold cache).
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Pinned to @main (not a release tag): this consumer needs the
+    # per-request HTTP timeout fix (no fixed 60s cap) for the slow Kimi
+    # reasoning endpoint, which landed on main after v1.0.0-beta.1. Re-pin
+    # to the next release once it ships with that fix.
+    uses: willie-yao/prow-ai-dashboard/.github/workflows/reusable-deploy.yml@main
+    with:
+      project_dir: "."
+      builds: 10
+      # Run on the in-cluster ARC self-hosted runner so the fetcher reaches the
+      # Dynamo frontend Service over cluster DNS (no port-forward), then
+      # publishes. runs-on is the ARC scale-set installation name (current ARC
+      # targets a runner set by its name, not a [self-hosted, label] array).
+      runs-on: "arc-qwen-runner"
+      fetch-timeout: "90m"   # cold builds=10 fetch is ~75-90 min (> 30m default)
+      ai-model: ${{ vars.AI_MODEL }}
+      ai-endpoint: ${{ vars.AI_ENDPOINT }}
+    secrets:
+      AI_TOKEN: ${{ secrets.AI_TOKEN }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

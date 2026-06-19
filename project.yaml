@@ -1,0 +1,141 @@
+# Project config for the CAPZ Prow dashboard (Dynamo demo).
+#
+# Mirrors willie-yao/capz-prow-ai-dashboard exactly EXCEPT for the AI
+# endpoint and runtime: this dashboard's analyses are produced by an
+# open-weight model served in-cluster via NVIDIA Dynamo on the demo AKS
+# cluster (currently Kimi-K2.7-Code on a vLLM backend), reached over
+# cluster-internal DNS from a self-hosted GitHub Actions runner. Same
+# prow jobs, same prompt, just a different model + endpoint. Lets the team
+# compare summary quality side-by-side at:
+#
+#   prod (Claude):     https://willie-yao.github.io/capz-prow-ai-dashboard/
+#   demo (Dynamo):     https://willie-yao.github.io/capz-prow-ai-dashboard-dynamo/
+
+id: capz-dynamo
+name: "Cluster API Provider Azure (Dynamo demo)"
+short_name: "CAPZ-Dynamo"
+
+# Only jobs that advertise this testgrid dashboard are included. Job
+# discovery is automatic: the engine asks GitHub code search for every
+# YAML under kubernetes/test-infra/config/jobs/ that mentions this
+# dashboard, then keeps the jobs whose testgrid-dashboards annotation
+# contains it.
+testgrid:
+  dashboard: "sig-cluster-lifecycle-cluster-api-provider-azure"
+
+# Same category rules as the prod CAPZ dashboard so a side-by-side
+# comparison is apples-to-apples.
+categories:
+  - match: "conformance"
+    id: "conformance"
+    label: "Conformance"
+  - match: "[managed kubernetes]"
+    id: "aks-e2e"
+    label: "AKS E2E"
+  - match: "e2e-aks"
+    id: "aks-e2e"
+    label: "AKS E2E"
+  - match: "capi-e2e"
+    id: "capi-e2e"
+    label: "CAPI E2E"
+  - match: "upgrade"
+    id: "upgrade"
+    label: "Upgrade"
+  - match: "coverage"
+    id: "coverage"
+    label: "Coverage"
+  - match: "scalability"
+    id: "scalability"
+    label: "Scalability"
+  - match: "e2e"
+    id: "capz-e2e"
+    label: "CAPZ E2E"
+
+category_display_order:
+  - capz-e2e
+  - aks-e2e
+  - upgrade
+  - capi-e2e
+  - conformance
+  - coverage
+  - scalability
+
+# GCS bucket holding build artifacts.
+gcs:
+  bucket: "kubernetes-ci-logs"
+
+# UI branding. The "(Dynamo demo)" suffix in the title makes it obvious
+# at a glance which dashboard the viewer is on.
+branding:
+  title: "CAPZ Prow Dashboard (Dynamo demo)"
+  base_path: "/capz-prow-ai-dashboard-dynamo"
+  site_url: "https://willie-yao.github.io/capz-prow-ai-dashboard-dynamo"
+  source_repo:
+    owner: "kubernetes-sigs"
+    name: "cluster-api-provider-azure"
+
+# AI analysis settings.
+#
+# Endpoint and model come from repo variables wired in
+# .github/workflows/deploy.yml. For this demo, set:
+#
+#   gh variable set AI_ENDPOINT \
+#     -b "http://kimi-k27-code-agg-frontend.default.svc:8000/v1/chat/completions"
+#   gh variable set AI_MODEL -b "moonshotai/Kimi-K2.7-Code"
+#
+# AI_ENDPOINT uses cluster-internal DNS because the GHA runner is the
+# in-cluster ARC runner labelled `arc-qwen-runner` (see deploy.yml).
+# The Dynamo frontend doesn't require an API key, but the engine
+# expects AI_TOKEN to be non-empty (any string works).
+ai:
+  # Phase L agentic analysis. Same as the prod CAPZ dashboard so the only
+  # intentional variable between the two deployments is the endpoint + model.
+
+  # Analyze failures in parallel against the in-cluster Dynamo endpoint
+  # (currently Kimi-K2.7-Code). It's a single deployment, so keep this
+  # modest to avoid saturating it: an earlier cold ARC fetch at
+  # concurrency=4 on a comparable single Dynamo model saturated the
+  # endpoint and many analyses hit the per-failure timeout under
+  # contention. 2 keeps the endpoint responsive while still ~halving
+  # cold-fetch wall clock. See prow-ai-dashboard/docs/agentic.md
+  # (ai.concurrency).
+  concurrency: 2
+
+  # Per-failure wall-clock budget. Default is 5m, which is too short here:
+  # Kimi is a reasoning model and decodes slower than a TRT-LLM served
+  # model, so a 30-iteration investigation needs headroom (a timeout
+  # discards all work, unlike a budget cap which finalizes gracefully).
+  # 15m gives the long digs room. Requires the engine's per-request HTTP
+  # timeout fix (no fixed 60s cap), so this consumer pins @main.
+  timeout: 15m
+
+  # max_iters bumped 20 -> 30: a builds=4 run on a comparable Dynamo model
+  # showed ~70% of analyses hit the 20-iteration cap while using only ~25%
+  # of the context window, i.e. they were iteration-bound, not
+  # context-bound. 30 lets the heavy-tail investigations keep drilling;
+  # peak context still stays well under the window. Applies to
+  # future/uncached analyses.
+  max_iters: 30
+  # NOTE: the model/context byte budgets are intentionally unset. The engine
+  # auto-sizes them from the endpoint's reported context window
+  # (Kimi-K2.7-Code = 262144 tokens -> ~524 KB / ~786 KB), so they no
+  # longer need hand-tuning per deployment. See prow-ai-dashboard
+  # docs/agentic.md ("Automatic budget sizing").
+  # Floors: keep a meaningful investigation bar.
+  min_tool_calls: 5
+  min_gcs_bytes: 500000
+  # On a critique retry, fetch the artifacts the draft cited but never
+  # read and inject their content into the feedback. Requires critique.
+  evidence_injection: true
+  # NOTE: single_tool_call is intentionally NOT set. Like Qwen3-Coder and
+  # unlike the stock Llama 3.1 template, Kimi emits parallel tool calls
+  # cleanly, so the client-side cap would only slow investigation down.
+  critique:
+    enabled: true
+    max_retries: 2
+  # NOTE: skills have no enable flag. The 10 recipes under skills/*.yaml are
+  # consulted automatically because critique is on (recipe presence alone
+  # would also auto-enable critique). Artifact-tree seeding is always on.
+  tools:
+    - filesystem
+    - k8s
