@@ -92,14 +92,14 @@ ai:
   # intentional variable between the two deployments is the endpoint + model.
 
   # Analyze failures in parallel against the in-cluster Dynamo endpoint
-  # (currently Kimi-K2.7-Code). It's a single deployment, so keep this
-  # modest to avoid saturating it: an earlier cold ARC fetch at
-  # concurrency=4 on a comparable single Dynamo model saturated the
-  # endpoint and many analyses hit the per-failure timeout under
-  # contention. 2 keeps the endpoint responsive while still ~halving
-  # cold-fetch wall clock. See prow-ai-dashboard/docs/agentic.md
-  # (ai.concurrency).
-  concurrency: 2
+  # (currently Kimi-K2.7-Code). A 2026-06-19 cold ARC fetch at concurrency=2
+  # completed ~49 analyses in the 90m window (~3.7 min each) with 0 endpoint
+  # saturation (no publish failures, healthy throughput), i.e. Kimi had clear
+  # headroom. 4 roughly doubles throughput so a cold fetch of ~110 failures
+  # clears inside the 150m budget below. Kimi tolerates this better than the
+  # larger Qwen 480B (which saturated at 4); dial back if per-failure timeouts
+  # spike. See prow-ai-dashboard/docs/agentic.md (ai.concurrency).
+  concurrency: 4
 
   # Per-failure wall-clock budget. Default is 5m, which is too short here:
   # Kimi is a reasoning model and decodes slower than a TRT-LLM served

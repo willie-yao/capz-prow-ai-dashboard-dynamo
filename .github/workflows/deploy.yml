@@ -42,7 +42,7 @@ jobs:
       # publishes. runs-on is the ARC scale-set installation name (current ARC
       # targets a runner set by its name, not a [self-hosted, label] array).
       runs-on: "arc-qwen-runner"
-      fetch-timeout: "90m"   # cold builds=10 fetch is ~75-90 min (> 30m default)
+      fetch-timeout: "150m"   # cold builds=10 on Kimi (~110 failures at concurrency=4) is ~100m; headroom over 90m
       ai-model: ${{ vars.AI_MODEL }}
       ai-endpoint: ${{ vars.AI_ENDPOINT }}
     secrets:
