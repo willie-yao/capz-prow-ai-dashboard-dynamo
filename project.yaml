@@ -47,7 +47,8 @@ category_display_order:
   - scalability
 
 # GCS bucket holding build artifacts.
-gcs:
+storage:
+  provider: gcs
   bucket: "kubernetes-ci-logs"
 
 # UI branding.
